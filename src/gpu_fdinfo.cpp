@@ -308,6 +308,21 @@ void GPU_fdinfo::get_current_hwmon_readings()
             }
         }
     }
+    
+    if (module == "rockchip-drm" && mali_voltage_stream.is_open()) {
+        mali_voltage_stream.seekg(0);
+        std::string voltage_str;
+        std::getline(mali_voltage_stream, voltage_str);
+        
+        if (!voltage_str.empty()) {
+            try {
+                // Regulator gives microvolts, convert to millivolts for display
+                hwmon_sensors["voltage"].val = std::stoull(voltage_str) / 1000;
+            } catch (const std::exception& e) {
+                SPDLOG_DEBUG("Failed to parse Mali GPU voltage: {}", e.what());
+            }
+        }
+    }
 }
 
 float GPU_fdinfo::get_power_usage()

@@ -123,6 +123,7 @@ private:
     int get_mali_clock();
     
     std::ifstream mali_temp_stream;
+    std::ifstream mali_voltage_stream;
 
 public:
     GPU_fdinfo(
@@ -222,6 +223,13 @@ public:
             mali_temp_stream.open(mali_temp_path);
             if (!mali_temp_stream.good()) {
                 SPDLOG_DEBUG("Failed to open Mali GPU temperature sensor: {}", mali_temp_path);
+            }
+            
+            // Initialize Mali GPU voltage monitoring
+            std::string mali_voltage_path = "/sys/class/regulator/regulator.15/microvolts";
+            mali_voltage_stream.open(mali_voltage_path);
+            if (!mali_voltage_stream.good()) {
+                SPDLOG_DEBUG("Failed to open Mali GPU voltage sensor: {}", mali_voltage_path);
             }
         }
 
