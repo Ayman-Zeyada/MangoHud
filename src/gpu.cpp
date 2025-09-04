@@ -1,7 +1,22 @@
 #include "gpu.h"
 #include "file_utils.h"
+#include <fstream>
 
 namespace fs = ghc::filesystem;
+
+std::string is_i915_or_xe() {
+    std::ifstream file("/proc/modules");
+    std::string line;
+    while (std::getline(file, line)) {
+        if (line.find("xe ") != std::string::npos) {
+            return "xe";
+        }
+        if (line.find("i915 ") != std::string::npos) {
+            return "i915";
+        }
+    }
+    return "i915";
+}
 
 GPUS::GPUS(overlay_params* const* params_pointer) : params_pointer(params_pointer) {
     std::set<std::string> gpu_entries;
@@ -9,8 +24,12 @@ GPUS::GPUS(overlay_params* const* params_pointer) : params_pointer(params_pointe
     for (const auto& entry : fs::directory_iterator("/sys/class/drm")) {
         if (!entry.is_directory())
             continue;
-
+        
         std::string node_name = entry.path().filename().string();
+        if (node_name.find("renderD129") != std::string::npos) {
+            SPDLOG_DEBUG("Skipping secondary render node (NPU): {}", node_name);
+            continue;
+        }
 
         // Check if the directory is a render node (e.g., renderD128, renderD129, etc.)
         if (node_name.find("renderD") == 0 && node_name.length() > 7) {
@@ -68,9 +87,17 @@ GPUS::GPUS(overlay_params* const* params_pointer) : params_pointer(params_pointe
             }
         }
 
+        if (!vendor_id) {
+            auto line = read_line("/sys/class/drm/" + node_name + "/device/uevent" );
+            if (line.find("DRIVER=rockchip-drm") != std::string::npos) {
+                SPDLOG_DEBUG("Rockchip Mali GPU found!");
+                vendor_id = 0x13B5; // ARM Mali vendor ID
+            }
+        }
+
         std::shared_ptr<GPU> ptr =
             std::make_shared<GPU>(node_name, vendor_id, device_id, pci_dev, driver);
-
+            
         if (params()->gpu_list.size() == 1 && params()->gpu_list[0] == idx++)
             ptr->is_active = true;
 
@@ -137,6 +164,27 @@ std::string GPUS::get_pci_device_address(const std::string& drm_card_path) {
     auto idx = subsystem.rfind("/") + 1; // /sys/bus/pci
                                          //         ^
                                          //         |- find this guy
+
+    fs::path device_path = fs::canonical(fs::path(drm_card_path) / "device");
+
+    std::string path_str = device_path.string();
+
+    std::regex pci_address_regex(R"((\d{4}:[a-z0-9]{2}:\d{2}\.\d))");
+    std::smatch match;
+    std::string pci_address;
+
+    auto it = std::sregex_iterator(path_str.begin(), path_str.end(), pci_address_regex);
+    auto end = std::sregex_iterator();
+    for (std::sregex_iterator i = it; i != end; ++i) {
+        pci_address = (*i).str();
+    }
+
+    if (!pci_address.empty()) {
+        return pci_address;
+    } else {
+        SPDLOG_DEBUG("PCI address not found in the path: " + path_str);
+    }
+
     if (subsystem.substr(idx) != "pci")
         return "";
 

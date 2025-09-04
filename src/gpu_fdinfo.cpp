@@ -292,6 +292,22 @@ void GPU_fdinfo::get_current_hwmon_readings()
 
         sensor->val = std::stoull(ss.str());
     }
+    
+    if (module == "rockchip-drm" && mali_temp_stream.is_open()) {
+        mali_temp_stream.seekg(0);
+        std::string temp_str;
+        std::getline(mali_temp_stream, temp_str);
+        
+        if (!temp_str.empty()) {
+            try {
+                // Thermal zone gives millicelsius, hwmon expects microcelsius
+                // But MangoHud expects millicelsius for display, so keep as is
+                hwmon_sensors["temp"].val = std::stoull(temp_str);
+            } catch (const std::exception& e) {
+                SPDLOG_DEBUG("Failed to parse Mali GPU temperature: {}", e.what());
+            }
+        }
+    }
 }
 
 float GPU_fdinfo::get_power_usage()
@@ -364,6 +380,8 @@ int GPU_fdinfo::get_gpu_load()
         return get_xe_load();
     else if (module == "msm_drm")
         return get_kgsl_load();
+    else if (module == "rockchip-drm")
+        return get_mali_load();
 
     uint64_t now = os_time_get_nano();
     uint64_t gpu_time_now = get_gpu_time();
@@ -529,6 +547,8 @@ int GPU_fdinfo::get_gpu_clock()
 {
     if (module == "panfrost")
         return get_gpu_clock_panfrost();
+    else if (module == "rockchip-drm")
+        return get_mali_clock();
 
     if (!gpu_clock_stream.is_open())
         return 0;
@@ -557,6 +577,55 @@ int GPU_fdinfo::get_gpu_clock_panfrost() {
     float freq = std::stoull(freq_str) / 1'000'000;
 
     return std::round(freq);
+}
+
+int GPU_fdinfo::get_mali_load() {
+    std::string load_path = "/sys/devices/platform/fb000000.gpu/devfreq/fb000000.gpu/load";
+    
+    if (!fs::exists(load_path)) {
+        SPDLOG_DEBUG("Mali GPU load path not found: {}", load_path);
+        return 0;
+    }
+    
+    try {
+        std::ifstream load_file(load_path);
+        std::string load_str;
+        std::getline(load_file, load_str);
+        
+        // Format is "X@YHz" where X is the percentage
+        size_t at_pos = load_str.find('@');
+        if (at_pos != std::string::npos) {
+            std::string load_value = load_str.substr(0, at_pos);
+            return std::stoi(load_value);
+        }
+        
+        SPDLOG_DEBUG("Unexpected Mali GPU load format: {}", load_str);
+        return 0;
+    } catch (const std::exception& e) {
+        SPDLOG_ERROR("Error reading Mali GPU load: {}", e.what());
+        return 0;
+    }
+}
+
+int GPU_fdinfo::get_mali_clock() {
+    std::string freq_path = "/sys/devices/platform/fb000000.gpu/devfreq/fb000000.gpu/cur_freq";
+    
+    if (!fs::exists(freq_path)) {
+        SPDLOG_DEBUG("Mali GPU frequency path not found: {}", freq_path);
+        return 0;
+    }
+    
+    try {
+        std::ifstream freq_file(freq_path);
+        std::string freq_str;
+        std::getline(freq_file, freq_str);
+        
+        // Convert from Hz to MHz
+        return std::stoi(freq_str) / 1000000;
+    } catch (const std::exception& e) {
+        SPDLOG_ERROR("Error reading Mali GPU frequency: {}", e.what());
+        return 0;
+    }
 }
 
 bool GPU_fdinfo::check_throttle_reasons(

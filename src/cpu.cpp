@@ -546,13 +546,14 @@ static void check_thermal_zones(std::string& path, std::string& input) {
             continue;
 
         std::string type = read_line(d / "type");
-        if (type.substr(0, 6) != "cpuss-")
-            continue;
-
-        path = d.path();
-        input = d / "temp";
-
-        return;
+        
+        if (type.find("core") != std::string::npos && 
+            (type.find("thermal") != std::string::npos || type.find("bigcore") != std::string::npos)) {
+            path = d.path();
+            input = d / "temp";
+            SPDLOG_DEBUG("Found Rockchip CPU thermal zone: {}", type);
+            return;
+        }
     }
 }
 

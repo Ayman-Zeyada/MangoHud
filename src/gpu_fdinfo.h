@@ -119,6 +119,11 @@ private:
     int get_kgsl_load();
     int get_kgsl_temp();
 
+    int get_mali_load();
+    int get_mali_clock();
+    
+    std::ifstream mali_temp_stream;
+
 public:
     GPU_fdinfo(
         const std::string module, const std::string pci_dev, const std::string drm_node,
@@ -149,6 +154,9 @@ public:
             init_kgsl();
         } else if (module == "panfrost") {
             drm_engine_type = "drm-engine-fragment";
+            drm_memory_type = "drm-resident-memory";
+        } else if (module == "rockchip-drm") {
+            drm_engine_type = "drm-engine-gpu";
             drm_memory_type = "drm-resident-memory";
         }
 
@@ -208,6 +216,14 @@ public:
             find_i915_gt_dir();
         else if (module == "xe")
             find_xe_gt_dir();
+        else if (module == "rockchip-drm") {
+            // Initialize Mali GPU temperature monitoring
+            std::string mali_temp_path = "/sys/class/thermal/thermal_zone5/temp";
+            mali_temp_stream.open(mali_temp_path);
+            if (!mali_temp_stream.good()) {
+                SPDLOG_DEBUG("Failed to open Mali GPU temperature sensor: {}", mali_temp_path);
+            }
+        }
 
         thread = std::thread(&GPU_fdinfo::main_thread, this);
         // "mangohud-gpufdinfo" wouldn't fit in the 15 byte limit
