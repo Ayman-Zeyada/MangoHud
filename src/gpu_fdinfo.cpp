@@ -309,6 +309,7 @@ void GPU_fdinfo::get_current_hwmon_readings()
         }
     }
     
+    // Read Mali GPU voltage from regulator
     if (module == "rockchip-drm" && mali_voltage_stream.is_open()) {
         mali_voltage_stream.seekg(0);
         std::string voltage_str;
@@ -320,6 +321,32 @@ void GPU_fdinfo::get_current_hwmon_readings()
                 hwmon_sensors["voltage"].val = std::stoull(voltage_str) / 1000;
             } catch (const std::exception& e) {
                 SPDLOG_DEBUG("Failed to parse Mali GPU voltage: {}", e.what());
+            }
+        }
+    }
+    
+    if (module == "rockchip-drm" && mali_current_stream.is_open() && mali_voltage_stream.is_open()) {
+        mali_current_stream.seekg(0);
+        std::string current_str;
+        std::getline(mali_current_stream, current_str);
+        
+        if (!current_str.empty()) {
+            try {
+                mali_voltage_stream.seekg(0);
+                std::string voltage_str;
+                std::getline(mali_voltage_stream, voltage_str);
+                
+                if (!voltage_str.empty()) {
+                    // Power = Voltage × Current
+                    // microvolts × microamps = picowatts, convert to microwatts for hwmon
+                    uint64_t voltage_uv = std::stoull(voltage_str);
+                    uint64_t current_ua = std::stoull(current_str);
+                    uint64_t power_uw = (voltage_uv * current_ua) / 1000000; // Convert to microwatts
+                    
+                    hwmon_sensors["power"].val = power_uw;
+                }
+            } catch (const std::exception& e) {
+                SPDLOG_DEBUG("Failed to calculate Mali GPU power: {}", e.what());
             }
         }
     }

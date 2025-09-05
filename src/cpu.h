@@ -56,7 +56,8 @@ enum {
    CPU_POWER_ZENERGY,
    CPU_POWER_RAPL,
    CPU_POWER_AMDGPU,
-   CPU_POWER_XGENE
+   CPU_POWER_XGENE,
+   CPU_POWER_ROCKCHIP
 };
 
 struct CPUPowerData {
@@ -160,6 +161,22 @@ struct CPUPowerData_xgene : public CPUPowerData {
    };
 
    FILE* powerFile {nullptr};
+};
+
+struct CPUPowerData_rockchip : public CPUPowerData {
+   CPUPowerData_rockchip() {
+      this->source = CPU_POWER_ROCKCHIP;
+   };
+
+   ~CPUPowerData_rockchip() {
+      if(this->voltageFile)
+         fclose(this->voltageFile);
+      if(this->currentFile)
+         fclose(this->currentFile);
+   };
+
+   FILE* voltageFile {nullptr};
+   FILE* currentFile {nullptr};
 };
 
 class CPUStats

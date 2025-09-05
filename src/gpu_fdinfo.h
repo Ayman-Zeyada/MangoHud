@@ -124,6 +124,7 @@ private:
     
     std::ifstream mali_temp_stream;
     std::ifstream mali_voltage_stream;
+    std::ifstream mali_current_stream;
 
 public:
     GPU_fdinfo(
@@ -230,6 +231,19 @@ public:
             mali_voltage_stream.open(mali_voltage_path);
             if (!mali_voltage_stream.good()) {
                 SPDLOG_DEBUG("Failed to open Mali GPU voltage sensor: {}", mali_voltage_path);
+            }
+            
+            // Initialize Mali GPU current monitoring for power calculation
+            std::string mali_current_path = "/sys/class/regulator/regulator.15/microamps";
+            mali_current_stream.open(mali_current_path);
+            if (!mali_current_stream.good()) {
+                SPDLOG_DEBUG("Failed to open Mali GPU current sensor: {}", mali_current_path);
+            }
+            
+            // Set dummy filename for power sensor so MangoHud uses our calculated value
+            if (mali_voltage_stream.good() && mali_current_stream.good()) {
+                hwmon_sensors["power"].filename = "calculated_power";
+                SPDLOG_DEBUG("Mali GPU: Power calculation enabled");
             }
         }
 

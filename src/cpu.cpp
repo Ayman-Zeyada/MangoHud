@@ -460,6 +460,32 @@ static bool get_cpu_power_xgene(CPUPowerData* cpuPowerData, float& power) {
     return true;
 }
 
+static bool get_cpu_power_rockchip(CPUPowerData* cpuPowerData, float& power) {
+    CPUPowerData_rockchip* powerData_rockchip = (CPUPowerData_rockchip*)cpuPowerData;
+    
+    if (!powerData_rockchip->voltageFile || !powerData_rockchip->currentFile)
+        return false;
+
+    rewind(powerData_rockchip->voltageFile);
+    rewind(powerData_rockchip->currentFile);
+    fflush(powerData_rockchip->voltageFile);
+    fflush(powerData_rockchip->currentFile);
+
+    uint64_t voltage_uv = 0, current_ua = 0;
+    
+    if (fscanf(powerData_rockchip->voltageFile, "%" SCNu64, &voltage_uv) != 1)
+        return false;
+        
+    if (fscanf(powerData_rockchip->currentFile, "%" SCNu64, &current_ua) != 1)
+        return false;
+
+    // Power = Voltage × Current
+    // microvolts × microamps = picowatts, convert to watts
+    power = (float)(voltage_uv * current_ua) / 1000000000000.0f;
+
+    return true;
+}
+
 bool CPUStats::UpdateCpuPower() {
     InitCpuPowerData();
 
@@ -486,6 +512,9 @@ bool CPUStats::UpdateCpuPower() {
             break;
         case CPU_POWER_XGENE:
             if (!get_cpu_power_xgene(m_cpuPowerData.get(), power)) return false;
+            break;
+        case CPU_POWER_ROCKCHIP:
+            if (!get_cpu_power_rockchip(m_cpuPowerData.get(), power)) return false;
             break;
         default:
             return false;
@@ -720,6 +749,30 @@ static CPUPowerData_xgene* init_cpu_power_data_xgene(const std::string path) {
     return powerData.release();
 }
 
+static CPUPowerData_rockchip* init_cpu_power_data_rockchip() {
+    auto powerData = std::make_unique<CPUPowerData_rockchip>();
+
+    // Use CPU regulator (vdd_cpu_lit_s0) for power monitoring
+    std::string voltageFile = "/sys/class/regulator/regulator.16/microvolts";
+    std::string currentFile = "/sys/class/regulator/regulator.16/microamps";
+    
+    if (!file_exists(voltageFile) || !file_exists(currentFile)) {
+        SPDLOG_DEBUG("Rockchip: CPU regulator files not found");
+        return nullptr;
+    }
+
+    powerData->voltageFile = fopen(voltageFile.c_str(), "r");
+    powerData->currentFile = fopen(currentFile.c_str(), "r");
+    
+    if (!powerData->voltageFile || !powerData->currentFile) {
+        SPDLOG_DEBUG("Rockchip: Failed to open CPU regulator files");
+        return nullptr;
+    }
+
+    SPDLOG_DEBUG("Rockchip: CPU power monitoring initialized");
+    return powerData.release();
+}
+
 bool CPUStats::InitCpuPowerData() {
     if(m_cpuPowerData != nullptr)
         return true;
@@ -769,16 +822,23 @@ bool CPUStats::InitCpuPowerData() {
 
     if (!cpuPowerData) {
         std::string powercap = "/sys/class/powercap/";
-        auto powercap_dirs = ls(powercap.c_str());
-        for (auto& dir : powercap_dirs) {
-            path = powercap + dir;
-            name = read_line(path + "/name");
-            SPDLOG_DEBUG("powercap: name: {}", name);
-            if (name == "package-0") {
-                cpuPowerData = (CPUPowerData*)init_cpu_power_data_rapl(path);
-                break;
+        if (dir_exists(powercap)) {
+            auto powercap_dirs = ls(powercap.c_str());
+            for (auto& dir : powercap_dirs) {
+                path = powercap + dir;
+                name = read_line(path + "/name");
+                SPDLOG_DEBUG("powercap: name: {}", name);
+                if (name == "package-0") {
+                    cpuPowerData = (CPUPowerData*)init_cpu_power_data_rapl(path);
+                    break;
+                }
             }
         }
+    }
+    
+    // Try Rockchip regulator-based power monitoring
+    if (!cpuPowerData) {
+        cpuPowerData = (CPUPowerData*)init_cpu_power_data_rockchip();
     }
     
     if(cpuPowerData == nullptr) {
